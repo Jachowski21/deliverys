@@ -1,0 +1,366 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local DataStoreService = game:GetService("DataStoreService")
+local moneyStore = DataStoreService:GetDataStore("PlayerMoney_v3")
+
+Players.PlayerAdded:Connect(function(player)
+	local leaderstats = Instance.new("Folder")
+	leaderstats.Name = "leaderstats"
+
+	local money = Instance.new("IntValue")
+	money.Name = "Money"
+
+	local success, savedMoney = pcall(function()
+		return moneyStore:GetAsync(tostring(player.UserId))
+	end)
+
+	if success and savedMoney then
+		money.Value = savedMoney
+	else
+		money.Value = 0
+	end
+
+	money.Parent = leaderstats
+	leaderstats.Parent = player
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+	local money = player.leaderstats and player.leaderstats:FindFirstChild("Money")
+	if money then
+		pcall(function()
+			moneyStore:SetAsync(tostring(player.UserId), money.Value)
+		end)
+	end
+end)
+
+-- Get delivery destination zones
+local deliveryZones = workspace.DeliveryZones:GetChildren()
+
+-- Create RemoteEvents folder if it doesn't exist
+local deliveryRemotes = Instance.new("Folder")
+deliveryRemotes.Name = "DeliveryRemotes"
+deliveryRemotes.Parent = ReplicatedStorage
+
+local updateMissionsEvent = Instance.new("RemoteEvent")
+updateMissionsEvent.Name = "UpdateMissions"
+updateMissionsEvent.Parent = deliveryRemotes
+
+local selectMissionEvent = Instance.new("RemoteEvent")
+selectMissionEvent.Name = "SelectMission"
+selectMissionEvent.Parent = deliveryRemotes
+
+-- Available delivery missions
+local DELIVERY_MISSIONS = {
+	{
+		name = "Pizza Delivery",
+		payment = {1200, 2500},
+		distance = {2, 8},
+		timeLimit = {180, 300}
+	},
+	{
+		name = "Package Delivery",
+		payment = {800, 1800},
+		distance = {1, 5},
+		timeLimit = {120, 240}
+	},
+	{
+		name = "Furniture Transport",
+		payment = {3000, 5000},
+		distance = {4, 12},
+		timeLimit = {300, 480}
+	},
+	{
+		name = "Food Delivery",
+		payment = {500, 1500},
+		distance = {1, 4},
+		timeLimit = {150, 240}
+	}
+}
+
+-- Function to show completion message
+local function showCompletionMessage(player)
+	local completionGui = Instance.new("ScreenGui")
+	completionGui.Name = "CompletionGui"
+
+	local frame = Instance.new("Frame")
+	frame.Size = UDim2.new(0, 300, 0, 50)
+	frame.Position = UDim2.new(0.7, 0, 0.02, 0)
+	frame.BackgroundColor3 = Color3.fromRGB(0, 200, 0)
+	frame.BackgroundTransparency = 0.2
+
+	local uiCorner = Instance.new("UICorner")
+	uiCorner.CornerRadius = UDim.new(0, 10)
+	uiCorner.Parent = frame
+
+	local message = Instance.new("TextLabel")
+	message.Size = UDim2.new(1, 0, 1, 0)
+	message.Text = "CONGRATULATIONS DELIVERY COMPLETED"
+	message.TextColor3 = Color3.fromRGB(255, 255, 255)
+	message.TextSize = 10
+	message.Font = Enum.Font.GothamBold
+	message.BackgroundTransparency = 1
+	message.Parent = frame
+
+	frame.Parent = completionGui
+	completionGui.Parent = player.PlayerGui
+
+	task.delay(3, function()
+		completionGui:Destroy()
+	end)
+end
+
+-- Function to highlight destination
+local function highlightDestination(part, player)
+	local highlightGui = Instance.new("ScreenGui")
+	highlightGui.Name = "HighlightGui"
+	highlightGui.Parent = player.PlayerGui
+
+	local highlight = Instance.new("Highlight")
+	highlight.FillColor = Color3.fromRGB(255, 0, 0)
+	highlight.OutlineColor = Color3.fromRGB(255, 0, 0)
+	highlight.FillTransparency = 0.3
+	highlight.OutlineTransparency = 0
+	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	highlight.Adornee = part
+	highlight.Parent = highlightGui
+
+	return highlight
+end
+
+-- Function to add money to player's bank GUI
+local function addMoney(player, amount)
+	local bankGui = player.PlayerGui:WaitForChild("MoneyGui")
+	local moneyLabel = bankGui:WaitForChild("Frame"):WaitForChild("MoneyLabel")
+	local leaderstats = player:FindFirstChild("leaderstats")
+	local moneyValue = leaderstats and leaderstats:FindFirstChild("Money")
+
+	if moneyValue then
+		moneyValue.Value = moneyValue.Value + amount
+		moneyLabel.Text = "zł" .. moneyValue.Value
+
+		pcall(function()
+			moneyStore:SetAsync(tostring(player.UserId), moneyValue.Value)
+		end)
+	end
+end
+Players.PlayerAdded:Connect(function(player)
+	local leaderstats = Instance.new("Folder")
+	leaderstats.Name = "leaderstats"
+
+	local money = Instance.new("IntValue")
+	money.Name = "Money"
+
+	local success, savedMoney = pcall(function()
+		return moneyStore:GetAsync(tostring(player.UserId))
+	end)
+
+	money.Value = success and savedMoney or 0
+	money.Parent = leaderstats
+	leaderstats.Parent = player
+
+	-- Update GUI with saved money value
+	task.spawn(function()
+		local bankGui = player.PlayerGui:WaitForChild("MoneyGui", 10)
+		if bankGui then
+			local moneyLabel = bankGui.Frame:WaitForChild("MoneyLabel", 10)
+			if moneyLabel then
+				moneyLabel.Text = "zł" .. money.Value
+
+				-- Keep GUI and leaderstats in sync
+				money.Changed:Connect(function(newValue)
+					moneyLabel.Text = "zł" .. newValue
+				end)
+			end
+		end
+	end)
+end)
+
+-- Generate random missions
+local function generateRandomMissions(count)
+	local missions = {}
+	for i = 1, count do
+		local missionTemplate = DELIVERY_MISSIONS[math.random(#DELIVERY_MISSIONS)]
+		local mission = {
+			name = missionTemplate.name,
+			payment = math.random(missionTemplate.payment[1], missionTemplate.payment[2]),
+			distance = math.random(missionTemplate.distance[1], missionTemplate.distance[2]),
+			timeLimit = math.random(missionTemplate.timeLimit[1], missionTemplate.timeLimit[2])
+		}
+		table.insert(missions, mission)
+	end
+	return missions
+end
+
+-- Create mission button
+local function createMissionButton(mission, gui, activeMissionDisplay, player)
+	local button = Instance.new("TextButton")
+	button.Size = UDim2.new(1, 0, 0, 80)
+	button.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+	button.Text = ""
+
+	local uiCorner = Instance.new("UICorner")
+	uiCorner.CornerRadius = UDim.new(0, 8)
+	uiCorner.Parent = button
+
+	local title = Instance.new("TextLabel")
+	title.Size = UDim2.new(1, 0, 0.4, 0)
+	title.Position = UDim2.new(0, 0, 0, 5)
+	title.Text = mission.name
+	title.TextColor3 = Color3.fromRGB(255, 255, 255)
+	title.TextSize = 18
+	title.Font = Enum.Font.GothamBold
+	title.BackgroundTransparency = 1
+	title.Parent = button
+
+	local info = Instance.new("TextLabel")
+	info.Size = UDim2.new(1, 0, 0.4, 0)
+	info.Position = UDim2.new(0, 0, 0.5, 0)
+	info.Text = string.format("Payment: zł%d | Distance: %dkm | Time: %ds", 
+		mission.payment, mission.distance, mission.timeLimit)
+	info.TextColor3 = Color3.fromRGB(200, 200, 200)
+	info.TextSize = 14
+	info.Font = Enum.Font.Gotham
+	info.BackgroundTransparency = 1
+	info.Parent = button
+
+	button.MouseButton1Click:Connect(function()
+		gui.MainFrame.Visible = false
+
+		-- Select random destination
+		local selectedZone = deliveryZones[math.random(#deliveryZones)]
+		local highlight = highlightDestination(selectedZone, player)
+
+		-- Ensure activeMissionDisplay is visible and properly positioned
+		activeMissionDisplay.Visible = true
+		activeMissionDisplay.missionTitle.Text = mission.name
+		activeMissionDisplay.missionDetails.Text = string.format("Payment: zł%d | Distance: %dkm | Time: %ds",
+			mission.payment, mission.distance, mission.timeLimit)
+
+		-- Create connection for delivery completion
+		local connection
+		connection = selectedZone.Touched:Connect(function(hit)
+			local hitPlayer = Players:GetPlayerFromCharacter(hit.Parent)
+			if hitPlayer and hitPlayer == player then
+				highlight:Destroy()
+				connection:Disconnect()
+				activeMissionDisplay.Visible = false
+
+				-- Add random reward
+				local reward = math.random(100, 1500)
+				addMoney(player, reward)
+				showCompletionMessage(player)
+			end
+		end)
+	end)
+
+	return button
+end
+
+-- Handle players
+local playersInZone = {}
+
+script.Parent.Touched:Connect(function(hit)
+	local player = Players:GetPlayerFromCharacter(hit.Parent)
+	if player and not playersInZone[player] then
+		playersInZone[player] = true
+
+		-- Create main GUI
+		local gui = Instance.new("ScreenGui")
+		gui.Name = "DeliveryGUI"
+		gui.Parent = player.PlayerGui
+
+		local mainFrame = Instance.new("Frame")
+		mainFrame.Name = "MainFrame"
+		mainFrame.Size = UDim2.new(0.4, 0, 0.6, 0)
+		mainFrame.Position = UDim2.new(0.3, 0, 0.2, 0)
+		mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+		mainFrame.BackgroundTransparency = 0.1
+		mainFrame.Parent = gui
+
+		local uiCorner = Instance.new("UICorner")
+		uiCorner.CornerRadius = UDim.new(0, 10)
+		uiCorner.Parent = mainFrame
+
+		local title = Instance.new("TextLabel")
+		title.Size = UDim2.new(1, 0, 0.1, 0)
+		title.Text = "Available Deliveries"
+		title.TextColor3 = Color3.fromRGB(255, 255, 255)
+		title.TextSize = 24
+		title.Font = Enum.Font.GothamBold
+		title.BackgroundTransparency = 1
+		title.Parent = mainFrame
+
+		local missionList = Instance.new("ScrollingFrame")
+		missionList.Name = "MissionList"
+		missionList.Size = UDim2.new(0.9, 0, 0.8, 0)
+		missionList.Position = UDim2.new(0.05, 0, 0.15, 0)
+		missionList.BackgroundTransparency = 1
+		missionList.ScrollBarThickness = 6
+		missionList.Parent = mainFrame
+
+		local listLayout = Instance.new("UIListLayout")
+		listLayout.Padding = UDim.new(0, 10)
+		listLayout.Parent = missionList
+
+		-- Create active mission display
+		local activeMissionDisplay = Instance.new("Frame")
+		activeMissionDisplay.Name = "ActiveMission"
+		activeMissionDisplay.Size = UDim2.new(0, 400, 0, 80)
+		activeMissionDisplay.Position = UDim2.new(0.5, -200, 0.02, 0)
+		activeMissionDisplay.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+		activeMissionDisplay.BackgroundTransparency = 0.1
+		activeMissionDisplay.Visible = false
+		activeMissionDisplay.Parent = player.PlayerGui
+
+		local displayCorner = Instance.new("UICorner")
+		displayCorner.CornerRadius = UDim.new(0, 10)
+		displayCorner.Parent = activeMissionDisplay
+
+		local gradient = Instance.new("UIGradient")
+		gradient.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(40, 40, 40)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(25, 25, 25))
+		})
+		gradient.Rotation = 45
+		gradient.Parent = activeMissionDisplay
+
+		local missionTitle = Instance.new("TextLabel")
+		missionTitle.Name = "missionTitle"
+		missionTitle.Size = UDim2.new(1, 0, 0.5, 0)
+		missionTitle.Text = ""
+		missionTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+		missionTitle.TextSize = 22
+		missionTitle.Font = Enum.Font.GothamBold
+		missionTitle.BackgroundTransparency = 1
+		missionTitle.Parent = activeMissionDisplay
+
+		local missionDetails = Instance.new("TextLabel")
+		missionDetails.Name = "missionDetails"
+		missionDetails.Size = UDim2.new(1, 0, 0.5, 0)
+		missionDetails.Position = UDim2.new(0, 0, 0.5, 0)
+		missionDetails.Text = ""
+		missionDetails.TextColor3 = Color3.fromRGB(200, 200, 200)
+		missionDetails.TextSize = 18
+		missionDetails.Font = Enum.Font.Gotham
+		missionDetails.BackgroundTransparency = 1
+		missionDetails.Parent = activeMissionDisplay
+
+		-- Generate and display missions
+		local missions = generateRandomMissions(4)
+		for _, mission in pairs(missions) do
+			local button = createMissionButton(mission, gui, activeMissionDisplay, player)
+			button.Parent = missionList
+		end
+	end
+end)
+
+script.Parent.TouchEnded:Connect(function(hit)
+	local player = Players:GetPlayerFromCharacter(hit.Parent)
+	if player then
+		playersInZone[player] = nil
+		local gui = player.PlayerGui:FindFirstChild("DeliveryGUI")
+		if gui then
+			gui:Destroy()
+		end
+	end
+end)
